@@ -223,7 +223,21 @@ public final class EpollSocketChannel extends AbstractEpollStreamChannel impleme
                 // Check isOpen() first as otherwise it will throw a RuntimeException
                 // when call getSoLinger() as the fd is not valid anymore.
                 if (isOpen() && config().getSoLinger() > 0) {
-                    return GlobalEventExecutor.INSTANCE;
+                    return new Executor() {
+                        @Override
+                        public void execute(Runnable task) {
+                            // We need to cancel this key of the channel so we may not end up in a eventloop spin
+                            // because we try to read or write until the actual close happens which may be later due
+                            // SO_LINGER handling.
+                            // See https://github.com/netty/netty/issues/4449
+                            try {
+                                ((EpollEventLoop) eventLoop()).remove(EpollSocketChannel.this);
+                            } catch (Exception ignore) {
+                                // ignore
+                            }
+                            GlobalEventExecutor.INSTANCE.execute(task);
+                        }
+                    };
                 }
             } catch (Throwable ignore) {
                 // Ignore the error as the underlying channel may be closed in the meantime and so
